@@ -1,0 +1,83 @@
+# Step 1: Installing Miniconda 3
+wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+
+# Step 2: Preparing a working directory
+mkdir snakemake-tutorial
+cd snakemake-tutorial
+
+wget https://bitbucket.org/snakemake/snakemake-tutorial/get/v5.2.3.tar.bz2
+tar -xf v5.2.3.tar.bz2 --strip 1
+# This will create a folder data and a file environment.yaml in the working directory.
+
+# Step 3: Creating an environment with the required software
+# The environment.yaml file can be used to install all required software into an isolated Conda environment with the name snakemake-tutorial via:
+conda env create --name snakemake-tutorial --file environment.yaml
+
+# Step 4: Activating the environment
+# To activate the snakemake-tutorial environment, execute
+conda activate snakemake-tutorial
+# To exit the environment, you can execute
+conda deactivate
+
+
+
+### Basics: An example workflow
+
+# Step 1: Mapping reads
+# Our first Snakemake rule maps reads of a given sample to a given reference genome (see Background). For this, we will use the tool bwa, specifically the subcommand bwa mem. In the working directory, create a new file called Snakefile with an editor of your choice. We propose to use the Atom editor, since it provides out-of-the-box syntax highlighting for Snakemake. In the Snakefile, define the following rule:
+
+vim Snakefile
+
+rule bwa_map:
+    input:
+        "data/genome.fa",
+        "data/samples/A.fastq" # Since the rule has multiple input files, Snakemake will concatenate them separated by a whitespace. In other words, Snakemake will replace {input} with data/genome.fa data/samples/A.fastq before executing the command.
+    output:
+        "mapped_reads/A.bam"
+    shell:
+        "bwa mem {input} | samtools view -Sb - > {output}"
+
+# Step 2: Generalizing the read mapping rule
+
+# Obviously, the rule will only work for a single sample with reads in the file data/samples/A.fastq. However, Snakemake allows to generalize rules by using named wildcards. Simply replace the A in the second input file and in the output file with the wildcard {sample}, leading to
+
+rule bwa_map:
+    input:
+        "data/genome.fa",
+        "data/samples/{sample}.fastq"
+    output:
+        "mapped_reads/{sample}.bam"
+    shell:
+        "bwa mem {input} | samtools view -Sb - > {output}"
+
+
+
+snakemake -np mapped_reads/A.bam mapped_reads/B.bam
+# Some Bash magic can make this particularly handy. For example, you can alternatively compose our multiple targets in a single pass via
+snakemake -np mapped_reads/{A,B}.bam
+
+# Step 3: Sorting read alignments
+# For later steps, we need the read alignments in the BAM files to be sorted. This can be achieved with the samtools command. We add the following rule beneath the bwa_map rule:
+rule samtools_sort:
+    input:
+        "mapped_reads/{sample}.bam"
+    output:
+        "sorted_reads/{sample}.bam"
+    shell:
+        "samtools sort -T sorted_reads/{wildcards.sample} "
+        "-O bam {input} > {output}"
+
+# Step 4: Indexing read alignments and visualizing the DAG of jobs
+rule samtools_index:
+    input:
+        "sorted_reads/{sample}.bam"
+    output:
+        "sorted_reads/{sample}.bam.bai"
+    shell:
+        "samtools index {input}"
+# Having three steps already, it is a good time to take a closer look at the resulting DAG of jobs. By executing
+snakemake --dag sorted_reads/{A,B}.bam.bai | dot -Tsvg > dag.svg
+# we create a visualization of the DAG using the dot command provided by Graphviz. For the given target files, Snakemake specifies the DAG in the dot language and pipes it into the dot command, which renders the definition into SVG format. The rendered DAG is piped into the file dag.svg and will look similar to this: https://snakemake.readthedocs.io/en/stable/_images/dag_index.png
+
+# Step 5: Calling genomic variants
